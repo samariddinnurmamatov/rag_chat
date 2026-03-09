@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadAndSplitPdf } from "@/lib/loaders/pdfLoader";
-import { createVectorStore, getVectorStore } from "@/lib/vectorstore";
+import { setLastPdfChunks } from "@/lib/pdfStore";
+import { createVectorStore } from "@/lib/vectorstore";
 
 export async function POST(request: NextRequest) {
     try {
@@ -16,11 +17,12 @@ export async function POST(request: NextRequest) {
     
         const buffer = Buffer.from(await file.arrayBuffer());
     
-        const chunks = await loadAndSplitPdf(buffer);
-    
-        await createVectorStore(chunks);
-    
-        return NextResponse.json({
+const chunks = await loadAndSplitPdf(buffer);
+
+    setLastPdfChunks(chunks);
+    await createVectorStore(chunks);
+
+    return NextResponse.json({
           message: "PDF indexed successfully",
           chunks: chunks.length,
         });

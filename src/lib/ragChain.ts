@@ -1,31 +1,50 @@
 import { llm } from "./llm";
+import {
+  getLastPdfChunks,
+  getChunksByKeywordSearch,
+} from "./pdfStore";
 import { getVectorStore } from "./vectorstore";
 
-export const askPDF = async (question: string) => {
-  const vectorStore = await getVectorStore();
+const K_CHUNKS = 8;
 
-  const retriever = vectorStore.asRetriever({
-    k: 4,
-  });
-
-  const docs = await retriever.invoke(question);
-
-  const context = docs.map((doc: any) => doc.pageContent).join("\n\n");
-
-  const prompt = `
-You are an AI assistant.
-Answer ONLY using the provided context.
-If the answer is not in the context, say:
-"I cannot find the answer in the provided PDF."
+function buildPrompt(context: string, question: string): string {
+  return `You are an AI assistant. Answer using ONLY the provided context from the PDF.
+If the context contains relevant information, answer clearly in the same language as the question (e.g. Uzbek or English).
+If the context does NOT contain relevant information, reply: "I cannot find the answer in the provided PDF."
 
 Context:
 ${context}
 
 Question:
-${question}
-`;
+${question}`;
+}
 
+export const askPDF = async (question: string) => {
+  let contextChunks: string[] = [];
+
+  try {
+    const vectorStore = await getVectorStore();
+    const retriever = vectorStore.asRetriever({ k: K_CHUNKS });
+    const docs = await retriever.invoke(question);
+    contextChunks = docs.map((doc: { pageContent?: string }) => doc?.pageContent ?? "").filter(Boolean);
+  } catch {
+    // Chroma not running or error — use keyword fallback
+  }
+
+  if (contextChunks.length === 0) {
+    contextChunks = getChunksByKeywordSearch(question, K_CHUNKS);
+  }
+
+  const memoryChunks = getLastPdfChunks();
+  if (memoryChunks.length === 0 && contextChunks.length === 0) {
+    return "Please upload a PDF first, then ask your question.";
+  }
+
+  const context = contextChunks.length > 0
+    ? contextChunks.join("\n\n")
+    : memoryChunks.slice(0, K_CHUNKS).join("\n\n");
+
+  const prompt = buildPrompt(context, question);
   const response = await llm.invoke(prompt);
-
-  return response.content;
+  return response.content as string;
 };
